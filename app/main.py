@@ -115,14 +115,21 @@ class Unit(BaseModel):
 # -----------------------------
 # Helpers
 # -----------------------------
+# --- SNIPPET HELPER ---
+def snippet_at(text: str, start: int, end: int) -> str:
+    s = max(0, start - 60)
+    e = min(len(text), end + 60)
+    return text[s:e].replace("\n", "\\n")
 
 def _add_hit(
     hits: List[dict],
     span: Tuple[int, int],
     target_name: str,
     suggested_statement: str,
+    src: str,
     note: Optional[str] = None
 ):
+    start, end = span
     meta = {
         "table": target_name,
         "target_type": "Table",
@@ -132,7 +139,8 @@ def _add_hit(
         "used_fields": [],
         "ambiguous": False,
         "suggested_statement": suggested_statement,
-        "suggested_fields": None
+        "suggested_fields": None,
+        "snippet": snippet_at(src, start, end)
     }
     if note:
         meta["note"] = note
@@ -144,14 +152,30 @@ def find_mm_im_issues(txt: str) -> List[dict]:
 
     issues: List[dict] = []
 
+    # for m in TABLE_RE.finditer(txt):
+    #     name = m.group("name").upper()
+    #     info = TABLE_MAP.get(name)
+    #     if info:
+    #         suggested = f"Use {info['new']} instead of {name}."
+    #         _add_hit(issues, m.span(), name, suggested,src=txt, note=info.get("note"))
     for m in TABLE_RE.finditer(txt):
         name = m.group("name").upper()
         info = TABLE_MAP.get(name)
-        if info:
-            suggested = f"Use {info['new']} instead of {name}."
-            _add_hit(issues, m.span(), name, suggested, note=info.get("note"))
+        if not info:
+            continue
+
+        # --- Skip if table is being UPDATED ---
+        # Look backwards a bit (10-20 chars) to see if 'UPDATE <table>' appears
+        start_idx = max(0, m.start() - 20)
+        prefix = txt[start_idx:m.start()].upper()
+        if re.search(r"\bUPDATE\s+$", prefix):
+            continue  # ignore UPDATE statements
+
+        suggested = f"Use {info['new']} instead of {name}."
+        _add_hit(issues, m.span(), name, suggested, src=txt, note=info.get("note"))
 
     return issues
+    # return issues
 
 # -----------------------------
 # API
